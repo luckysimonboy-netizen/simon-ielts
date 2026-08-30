@@ -1,468 +1,1308 @@
 import streamlit as st
 import random
+import time
+from datetime import date, datetime
+
+# =========================
+# IELTS MASTER V4
+# =========================
 
 st.set_page_config(
-    page_title="Simon IELTS",
+    page_title="IELTS Master V4",
     page_icon="🎓",
     layout="wide"
 )
 
-# ---------- CSS ----------
-st.markdown("""
-<style>
-.main-title {
-    font-size: 48px;
-    font-weight: 800;
+# ---------- Session ----------
+defaults = {
+    "page": "Dashboard",
+    "name": "",
+    "goal": 6.5,
+    "bands": {},
+    "history": [],
+    "mistakes": [],
+    "timer_end": None,
+    "streak": 0,
+    "last_day": None,
+    "writing_count": 0,
+    "speaking_count": 0,
+    "vocab_score": 0,
 }
-.subtitle {
-    font-size: 20px;
-    color: #666;
-}
-.card {
-    padding: 25px;
-    border-radius: 18px;
-    border: 1px solid #ddd;
-    margin-bottom: 20px;
-}
-.score {
-    font-size: 42px;
-    font-weight: 800;
-}
-</style>
-""", unsafe_allow_html=True)
 
-# ---------- Data ----------
-reading_questions = [
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+# ---------- Functions ----------
+def mark_study():
+    today = date.today().isoformat()
+
+    if st.session_state.last_day != today:
+        st.session_state.streak += 1
+        st.session_state.last_day = today
+
+
+def start_timer(minutes):
+    st.session_state.timer_end = time.time() + minutes * 60
+
+
+def show_timer():
+    if st.session_state.timer_end is None:
+        return
+
+    remaining = max(
+        0,
+        int(st.session_state.timer_end - time.time())
+    )
+
+    if remaining == 0:
+        st.session_state.timer_end = None
+        st.error("⏰ Time is up!")
+    else:
+        minutes = remaining // 60
+        seconds = remaining % 60
+
+        st.warning(
+            f"⏱️ Time remaining: "
+            f"**{minutes:02d}:{seconds:02d}**"
+        )
+
+
+def estimate_band(correct, total):
+    if total == 0:
+        return 0
+
+    ratio = correct / total
+
+    if ratio >= 0.95:
+        return 9.0
+    elif ratio >= 0.90:
+        return 8.5
+    elif ratio >= 0.80:
+        return 7.5
+    elif ratio >= 0.70:
+        return 6.5
+    elif ratio >= 0.60:
+        return 6.0
+    elif ratio >= 0.50:
+        return 5.5
+    elif ratio >= 0.40:
+        return 5.0
+    elif ratio >= 0.30:
+        return 4.5
+    else:
+        return 4.0
+
+
+def save_result(skill, score, detail):
+    st.session_state.bands[skill] = score
+
+    st.session_state.history.append({
+        "Time": datetime.now().strftime(
+            "%Y-%m-%d %H:%M"
+        ),
+        "Skill": skill,
+        "Band": score,
+        "Detail": detail
+    })
+
+
+# =========================
+# DATA
+# =========================
+
+READING = [
     {
-        "question": "What is one major advantage of learning a foreign language?",
-        "options": [
-            "It makes people taller",
-            "It improves communication",
-            "It eliminates exams",
-            "It reduces sleep"
-        ],
-        "answer": "It improves communication"
+        "title": "Urban Green Spaces",
+        "text": """
+Urban parks have changed considerably over the last two centuries.
+
+Early public parks were often created to provide attractive scenery
+and cleaner air for residents of crowded industrial cities.
+
+Today, urban green spaces have a much wider purpose.
+
+Trees can lower surface temperatures and provide shade.
+Plants may help manage rainwater and create habitats for insects
+and birds.
+
+Parks can also encourage walking, exercise and social interaction.
+
+However, parks require funding and maintenance.
+Attractive green areas may sometimes be followed by rising
+property prices.
+
+Modern planning therefore considers accessibility and inclusion.
+        """,
+        "questions": [
+            {
+                "q": "Early parks were partly created to provide:",
+                "options": [
+                    "Cleaner air and scenery",
+                    "Factories",
+                    "Shopping centres",
+                    "Private housing"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "Trees can help:",
+                "options": [
+                    "Increase traffic",
+                    "Lower surface temperatures",
+                    "Remove parks",
+                    "Increase pollution"
+                ],
+                "answer": 1
+            },
+            {
+                "q": "Parks can encourage:",
+                "options": [
+                    "Exercise",
+                    "Factory work",
+                    "Traffic",
+                    "Higher pollution"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "A possible problem is:",
+                "options": [
+                    "Rising property prices",
+                    "Less sunlight",
+                    "More factories",
+                    "Fewer buildings"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "Modern planning considers:",
+                "options": [
+                    "Accessibility",
+                    "Cars only",
+                    "Factories only",
+                    "Private ownership only"
+                ],
+                "answer": 0
+            }
+        ]
     },
+
     {
-        "question": "Which skill is particularly important for IELTS Speaking?",
-        "options": [
-            "Memorising every answer",
-            "Speaking naturally and clearly",
-            "Writing long essays",
-            "Reading silently"
-        ],
-        "answer": "Speaking naturally and clearly"
-    },
-    {
-        "question": "What should an IELTS essay normally contain?",
-        "options": [
-            "Only one paragraph",
-            "An introduction, body paragraphs and a conclusion",
-            "Only examples",
-            "Only personal stories"
-        ],
-        "answer": "An introduction, body paragraphs and a conclusion"
+        "title": "Public Transport",
+        "text": """
+Cities are investing in public transport as populations grow.
+
+Rail systems, buses and cycling networks can move large numbers
+of people while using less urban space than private cars.
+
+Infrastructure is expensive and new rail lines can take years
+to build.
+
+Nevertheless, reliable transport can create long-term economic
+benefits by connecting workers with employment and reducing
+congestion.
+
+Technology is changing transport too.
+
+Real-time information helps passengers plan journeys, while
+electronic ticketing can reduce queues.
+        """,
+        "questions": [
+            {
+                "q": "Public transport can use less space than:",
+                "options": [
+                    "Private cars",
+                    "Walking",
+                    "Cycling",
+                    "Trains"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "Infrastructure can be:",
+                "options": [
+                    "Free",
+                    "Expensive",
+                    "Unnecessary",
+                    "Temporary"
+                ],
+                "answer": 1
+            },
+            {
+                "q": "Reliable transport can:",
+                "options": [
+                    "Reduce congestion",
+                    "Increase pollution",
+                    "Remove jobs",
+                    "Stop technology"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "Real-time information helps passengers:",
+                "options": [
+                    "Plan journeys",
+                    "Buy houses",
+                    "Build trains",
+                    "Avoid transport"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "Electronic ticketing can:",
+                "options": [
+                    "Increase queues",
+                    "Reduce queues",
+                    "Remove buses",
+                    "Increase pollution"
+                ],
+                "answer": 1
+            }
+        ]
     }
 ]
 
-speaking_topics = [
-    "Describe a person who has influenced you.",
-    "Describe a place you would like to visit.",
-    "Describe an important decision you made.",
+
+LISTENING = [
+    {
+        "title": "Language Centre",
+        "transcript": """
+The student wants to improve speaking because lectures are easy
+to understand but presentations make the student nervous.
+
+A presentation workshop runs on Thursday afternoon.
+
+However, the student has a laboratory class on Thursday.
+
+The adviser recommends a discussion group on Tuesday morning.
+
+Registration closes this Friday.
+
+There is no fee for enrolled students.
+        """,
+        "questions": [
+            {
+                "q": "What skill does the student want to improve?",
+                "options": [
+                    "Speaking",
+                    "Reading",
+                    "Writing",
+                    "Grammar"
+                ],
+                "answer": 0
+            },
+            {
+                "q": "When is the presentation workshop?",
+                "options": [
+                    "Monday",
+                    "Tuesday",
+                    "Thursday afternoon",
+                    "Friday"
+                ],
+                "answer": 2
+            },
+            {
+                "q": "Why can't the student attend?",
+                "options": [
+                    "Cost",
+                    "Laboratory class",
+                    "Work",
+                    "Travel"
+                ],
+                "answer": 1
+            },
+            {
+                "q": "When is the discussion group?",
+                "options": [
+                    "Monday morning",
+                    "Tuesday morning",
+                    "Thursday afternoon",
+                    "Friday morning"
+                ],
+                "answer": 1
+            },
+            {
+                "q": "When does registration close?",
+                "options": [
+                    "Today",
+                    "Monday",
+                    "This Friday",
+                    "Next month"
+                ],
+                "answer": 2
+            }
+        ]
+    }
+]
+
+
+VOCABULARY = [
+    ("crucial", "extremely important"),
+    ("allocate", "give a particular amount of time or money"),
+    ("substantial", "large in amount"),
+    ("deteriorate", "become worse"),
+    ("enhance", "improve something"),
+    ("contribute", "help cause something"),
+    ("sustainable", "able to continue without serious harm"),
+    ("perspective", "a particular way of viewing something"),
+    ("implement", "put a plan into action"),
+    ("inevitable", "certain to happen"),
+    ("mitigate", "reduce a harmful effect"),
+    ("coherent", "logical and well organised"),
+]
+
+
+PART1 = {
+    "Study": [
+        "What are you studying?",
+        "Why did you choose it?",
+        "What do you enjoy most about it?"
+    ],
+    "Hometown": [
+        "Where is your hometown?",
+        "What do you like about it?",
+        "Has it changed much?"
+    ],
+    "Technology": [
+        "What technology do you use every day?",
+        "Do you like new technology?",
+        "What technology would you like to learn?"
+    ]
+}
+
+
+PART2 = [
+    "Describe a useful website you often use.",
+    "Describe a place you enjoy visiting.",
     "Describe a skill you would like to learn.",
-    "Describe a memorable day in your life.",
-    "Describe a book or film you enjoyed.",
-    "Describe something useful you bought.",
-    "Describe a country you would like to live in."
+    "Describe an important decision you have made.",
+    "Describe a memorable journey."
 ]
 
-vocabulary = [
-    ("significant", "重要的", "The government made a significant investment."),
-    ("contribute", "贡献", "Education can contribute to economic growth."),
-    ("consequence", "后果", "Every decision has consequences."),
-    ("environment", "环境", "We should protect the environment."),
-    ("beneficial", "有益的", "Exercise is beneficial to our health."),
-    ("essential", "必要的", "Good communication is essential."),
-    ("increase", "增加", "The number of students has increased."),
-    ("decline", "下降", "The birth rate has declined."),
-    ("maintain", "维持", "It is difficult to maintain a balance."),
-    ("opportunity", "机会", "Education provides more opportunities.")
+
+PART3 = [
+    "Why do people find change difficult?",
+    "How can schools prepare students for future jobs?",
+    "Does technology always improve people's lives?",
+    "What are the advantages and disadvantages of large cities?"
 ]
 
-# ---------- Sidebar ----------
-st.sidebar.title("🎓 Simon IELTS")
 
-page = st.sidebar.radio(
-    "Menu",
-    [
-        "🏠 Home",
+# =========================
+# SIDEBAR
+# =========================
+
+with st.sidebar:
+
+    st.title("🎓 IELTS Master V4")
+
+    st.session_state.name = st.text_input(
+        "Your name",
+        st.session_state.name
+    )
+
+    st.session_state.goal = st.select_slider(
+        "Target Band",
+        options=[
+            5.0,
+            5.5,
+            6.0,
+            6.5,
+            7.0,
+            7.5,
+            8.0,
+            8.5,
+            9.0
+        ],
+        value=st.session_state.goal
+    )
+
+    st.divider()
+
+    pages = [
+        "Dashboard",
         "📖 Reading",
         "🎧 Listening",
         "✍️ Writing",
         "🗣️ Speaking",
         "📚 Vocabulary",
-        "📝 Mock Test",
-        "📊 My Progress"
-    ]
-)
-
-# ---------- Home ----------
-if page == "🏠 Home":
-
-    st.markdown(
-        '<div class="main-title">Simon IELTS 🎓</div>',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="subtitle">Complete IELTS Practice Platform</div>',
-        unsafe_allow_html=True
-    )
-
-    st.write("")
-    st.success("Welcome! Let's improve your IELTS score step by step.")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("Reading", "4.0", "Target 6.5")
-
-    with col2:
-        st.metric("Listening", "4.5", "Target 6.5")
-
-    with col3:
-        st.metric("Writing", "5.5", "Target 6.5")
-
-    with col4:
-        st.metric("Speaking", "5.5", "Target 6.5")
-
-    st.divider()
-
-    st.subheader("🚀 Start Practising")
-
-    a, b = st.columns(2)
-
-    with a:
-        st.info("""
-        ### 📖 Reading
-        Practise reading questions and improve your accuracy.
-        """)
-
-        st.info("""
-        ### 🎧 Listening
-        Train your listening comprehension and vocabulary.
-        """)
-
-    with b:
-        st.info("""
-        ### ✍️ Writing
-        Practise Task 1 and Task 2 with IELTS-style questions.
-        """)
-
-        st.info("""
-        ### 🗣️ Speaking
-        Practise Part 1, Part 2 and Part 3 questions.
-        """)
-
-# ---------- Reading ----------
-elif page == "📖 Reading":
-
-    st.title("📖 IELTS Reading Practice")
-
-    st.write("Choose the best answer for each question.")
-
-    score = 0
-
-    for i, q in enumerate(reading_questions):
-
-        st.subheader(f"Question {i + 1}")
-
-        answer = st.radio(
-            q["question"],
-            q["options"],
-            key=f"reading_{i}"
-        )
-
-        if st.button(f"Check Question {i + 1}", key=f"check_{i}"):
-
-            if answer == q["answer"]:
-                st.success("✅ Correct!")
-                score += 1
-            else:
-                st.error(f"❌ Incorrect. Correct answer: {q['answer']}")
-
-    st.divider()
-
-    st.caption(
-        "Tip: Don't translate every word. Focus on keywords and meaning."
-    )
-
-# ---------- Listening ----------
-elif page == "🎧 Listening":
-
-    st.title("🎧 IELTS Listening")
-
-    st.info(
-        "The listening section will be expanded with audio files and "
-        "full IELTS-style tests in the next version."
-    )
-
-    st.subheader("Listening Strategy")
-
-    strategies = [
-        "Read the questions before the audio starts.",
-        "Underline important keywords.",
-        "Pay attention to numbers, names and dates.",
-        "Do not panic if you miss one answer.",
-        "Check spelling carefully."
+        "📊 Progress",
+        "❌ Mistake Book"
     ]
 
-    for strategy in strategies:
-        st.write("✅", strategy)
-
-# ---------- Writing ----------
-elif page == "✍️ Writing":
-
-    st.title("✍️ IELTS Writing")
-
-    task = st.selectbox(
-        "Choose a task",
-        ["Task 1", "Task 2"]
-    )
-
-    if task == "Task 1":
-
-        st.subheader("IELTS Academic Task 1")
-
-        st.write("""
-        The chart below shows changes in the number of people using
-        different forms of transportation.
-        """)
-
-        st.text_area(
-            "Write your answer here:",
-            height=300
-        )
-
-        st.button("Submit Writing")
-
-        st.caption(
-            "Target: at least 150 words."
-        )
-
-    else:
-
-        st.subheader("IELTS Writing Task 2")
-
-        topic = st.selectbox(
-            "Choose a topic",
-            [
-                "Technology",
-                "Education",
-                "Environment",
-                "Health",
-                "Government",
-                "Work",
-                "Society"
-            ]
-        )
-
-        questions = {
-            "Technology":
-            "Some people think technology makes life easier. "
-            "To what extent do you agree or disagree?",
-
-            "Education":
-            "Some people believe university education should be free. "
-            "To what extent do you agree or disagree?",
-
-            "Environment":
-            "Environmental problems are becoming increasingly serious. "
-            "What are the causes and solutions?",
-
-            "Health":
-            "Many people today live unhealthy lifestyles. "
-            "What are the causes and what can be done?",
-
-            "Government":
-            "Governments should spend more money on public services "
-            "than on the arts. To what extent do you agree?",
-
-            "Work":
-            "Some people prefer working from home. "
-            "Discuss the advantages and disadvantages.",
-
-            "Society":
-            "Some people believe modern society is becoming less friendly. "
-            "Do you agree or disagree?"
-        }
-
-        st.info(questions[topic])
-
-        essay = st.text_area(
-            "Write your essay:",
-            height=450
-        )
-
-        word_count = len(essay.split())
-
-        st.write(f"**Word count: {word_count}**")
-
-        if word_count >= 250:
-            st.success("✅ Good length for Task 2.")
-        elif word_count > 0:
-            st.warning("⚠️ Try to reach at least 250 words.")
-
-        st.button("Submit Essay")
-
-# ---------- Speaking ----------
-elif page == "🗣️ Speaking":
-
-    st.title("🗣️ IELTS Speaking")
-
-    part = st.selectbox(
-        "Choose Speaking Part",
-        ["Part 1", "Part 2", "Part 3"]
-    )
-
-    if part == "Part 1":
-
-        topics = [
-            "Do you enjoy studying English?",
-            "What do you usually do in your free time?",
-            "Do you like travelling?",
-            "What kind of music do you enjoy?",
-            "Do you prefer studying alone or with others?"
-        ]
-
-        st.subheader("Part 1 Questions")
-
-        for question in topics:
-            st.write("•", question)
-
-    elif part == "Part 2":
-
-        st.subheader("Part 2 Cue Card")
-
-        topic = random.choice(speaking_topics)
-
-        st.info(topic)
-
-        st.write("⏱️ Preparation time: 1 minute")
-        st.write("🗣️ Speaking time: 1–2 minutes")
-
-        if st.button("New Topic"):
+    for page in pages:
+        if st.button(
+            page,
+            use_container_width=True
+        ):
+            st.session_state.page = page
             st.rerun()
 
-    else:
+    st.divider()
 
-        st.subheader("Part 3 Discussion")
-
-        questions = [
-            "Why do people travel more nowadays?",
-            "How has technology changed education?",
-            "What makes a good teacher?",
-            "Should governments invest more in education?",
-            "How might society change in the future?"
-        ]
-
-        for question in questions:
-            st.write("•", question)
-
-# ---------- Vocabulary ----------
-elif page == "📚 Vocabulary":
-
-    st.title("📚 IELTS Vocabulary")
-
-    search = st.text_input("Search vocabulary")
-
-    for word, meaning, example in vocabulary:
-
-        if not search or search.lower() in word.lower():
-
-            with st.container(border=True):
-
-                st.subheader(word)
-
-                st.write(f"**中文：** {meaning}")
-                st.write(f"**Example:** {example}")
-
-# ---------- Mock Test ----------
-elif page == "📝 Mock Test":
-
-    st.title("📝 IELTS Mini Mock Test")
-
-    st.write(
-        "This mini test gives you a quick estimate of your current performance."
+    st.metric(
+        "🔥 Study streak",
+        f"{st.session_state.streak} day(s)"
     )
 
-    questions = reading_questions
+
+# =========================
+# DASHBOARD
+# =========================
+
+if st.session_state.page == "Dashboard":
+
+    mark_study()
+
+    st.title("🎓 IELTS Master V4")
+
+    if st.session_state.name:
+        st.subheader(
+            f"Welcome back, {st.session_state.name} 👋"
+        )
+
+    st.write(
+        "Your complete IELTS practice dashboard."
+    )
+
+    st.divider()
+
+    cols = st.columns(4)
+
+    for col, skill in zip(
+        cols,
+        ["Reading", "Listening", "Writing", "Speaking"]
+    ):
+        value = st.session_state.bands.get(
+            skill,
+            "—"
+        )
+
+        col.metric(
+            skill,
+            value
+        )
+
+    st.divider()
+
+    values = list(
+        st.session_state.bands.values()
+    )
+
+    if values:
+
+        average = sum(values) / len(values)
+
+        st.subheader(
+            f"🎯 Current average: {average:.1f}"
+        )
+
+        st.progress(
+            min(average / 9, 1)
+        )
+
+        gap = max(
+            0,
+            st.session_state.goal - average
+        )
+
+        st.write(
+            f"Target: **{st.session_state.goal:.1f}**"
+        )
+
+        st.write(
+            f"Remaining gap: **{gap:.1f}**"
+        )
+
+    else:
+
+        st.info(
+            "Complete your first practice test "
+            "to establish a baseline."
+        )
+
+    st.divider()
+
+    st.subheader("🚀 Recommended routine")
+
+    st.write(
+        """
+        **10 min Reading**
+        → **10 min Listening**
+        → **10 min Vocabulary**
+        → **10 min Speaking**
+        """
+    )
+
+
+# =========================
+# READING
+# =========================
+
+elif st.session_state.page == "📖 Reading":
+
+    mark_study()
+
+    st.title("📖 IELTS Reading")
+
+    passage = st.selectbox(
+        "Choose passage",
+        READING,
+        format_func=lambda x: x["title"]
+    )
+
+    if st.button(
+        "⏱️ Start 20-minute timer"
+    ):
+        start_timer(20)
+
+    show_timer()
+
+    st.subheader(
+        passage["title"]
+    )
+
+    st.write(
+        passage["text"]
+    )
+
+    st.divider()
 
     answers = []
 
-    for i, q in enumerate(questions):
+    for i, question in enumerate(
+        passage["questions"]
+    ):
 
         answer = st.radio(
-            f"{i + 1}. {q['question']}",
-            q["options"],
-            key=f"mock_{i}"
+            f"{i + 1}. {question['q']}",
+            question["options"],
+            index=None,
+            key=f"reading_{passage['title']}_{i}"
         )
 
         answers.append(answer)
 
-    if st.button("Submit Mock Test"):
+    if st.button(
+        "✅ Submit Reading",
+        type="primary"
+    ):
 
-        score = sum(
-            answers[i] == questions[i]["answer"]
-            for i in range(len(questions))
+        correct = 0
+
+        for answer, question in zip(
+            answers,
+            passage["questions"]
+        ):
+
+            if (
+                answer
+                == question["options"][
+                    question["answer"]
+                ]
+            ):
+                correct += 1
+
+        total = len(
+            passage["questions"]
+        )
+
+        score = estimate_band(
+            correct,
+            total
+        )
+
+        save_result(
+            "Reading",
+            score,
+            f"{correct}/{total}"
         )
 
         st.success(
-            f"You scored {score}/{len(questions)}"
+            f"Score: **{correct}/{total}**"
         )
 
-        if score == len(questions):
-            st.balloons()
-            st.write("🔥 Excellent!")
+        st.success(
+            f"Estimated practice Band: **{score}**"
+        )
 
-        elif score >= 2:
-            st.write("👍 Good job! Keep practising.")
+        for answer, question in zip(
+            answers,
+            passage["questions"]
+        ):
 
-        else:
-            st.write("💪 Keep practising. You will improve.")
+            correct_answer = question[
+                "options"
+            ][question["answer"]]
 
-# ---------- Progress ----------
-elif page == "📊 My Progress":
+            if answer != correct_answer:
 
-    st.title("📊 My IELTS Progress")
+                st.session_state.mistakes.append(
+                    {
+                        "skill": "Reading",
+                        "question": question["q"],
+                        "answer": correct_answer
+                    }
+                )
 
-    st.subheader("Current Scores")
 
-    scores = {
-        "Listening": 4.5,
-        "Reading": 4.0,
-        "Writing": 5.5,
-        "Speaking": 5.5
-    }
+# =========================
+# LISTENING
+# =========================
 
-    for skill, score in scores.items():
+elif st.session_state.page == "🎧 Listening":
 
-        st.write(f"### {skill}")
+    mark_study()
 
-        st.progress(score / 9)
+    st.title("🎧 IELTS Listening")
 
-        st.write(f"Band {score}")
+    section = st.selectbox(
+        "Choose section",
+        LISTENING,
+        format_func=lambda x: x["title"]
+    )
+
+    st.info(
+        "For realistic practice, use your own recording. "
+        "The transcript is available for study."
+    )
+
+    audio = st.file_uploader(
+        "Upload audio",
+        type=[
+            "mp3",
+            "wav",
+            "m4a"
+        ]
+    )
+
+    if audio:
+        st.audio(audio)
+
+    if st.checkbox(
+        "Show transcript"
+    ):
+        st.write(
+            section["transcript"]
+        )
 
     st.divider()
 
-    st.subheader("🎯 Target")
+    answers = []
 
-    st.write("Overall target: **Band 6.5**")
+    for i, question in enumerate(
+        section["questions"]
+    ):
 
-    st.info(
-        "Keep practising every day. Consistency matters more than "
-        "studying for many hours once in a while."
+        answer = st.radio(
+            f"{i + 1}. {question['q']}",
+            question["options"],
+            index=None,
+            key=f"listen_{section['title']}_{i}"
+        )
+
+        answers.append(answer)
+
+    if st.button(
+        "✅ Submit Listening",
+        type="primary"
+    ):
+
+        correct = 0
+
+        for answer, question in zip(
+            answers,
+            section["questions"]
+        ):
+
+            if (
+                answer
+                == question["options"][
+                    question["answer"]
+                ]
+            ):
+                correct += 1
+
+        total = len(
+            section["questions"]
+        )
+
+        score = estimate_band(
+            correct,
+            total
+        )
+
+        save_result(
+            "Listening",
+            score,
+            f"{correct}/{total}"
+        )
+
+        st.success(
+            f"Score: **{correct}/{total}**"
+        )
+
+        st.success(
+            f"Estimated practice Band: **{score}**"
+        )
+
+
+# =========================
+# WRITING
+# =========================
+
+elif st.session_state.page == "✍️ Writing":
+
+    mark_study()
+
+    st.title("✍️ IELTS Writing")
+
+    task = st.selectbox(
+        "Choose task",
+        [
+            "Task 1 — Academic",
+            "Task 1 — General Training",
+            "Task 2 — Essay"
+        ]
     )
 
-st.sidebar.divider()
-st.sidebar.caption("Simon IELTS • Built with Streamlit")
+    if task == "Task 2 — Essay":
+
+        prompt = """
+Some people believe that students should study
+only subjects that are useful for their future careers.
+
+Others believe that students should study
+a wide range of subjects.
+
+Discuss both views and give your own opinion.
+        """
+
+        minimum = 250
+
+    elif task == "Task 1 — Academic":
+
+        prompt = """
+The chart below shows changes in the percentage
+of people using different forms of transport.
+
+Summarise the main features and make comparisons
+where relevant.
+        """
+
+        minimum = 150
+
+    else:
+
+        prompt = """
+Write a letter to a friend who is visiting your city.
+
+Recommend a place to visit and explain
+what they can do there.
+        """
+
+        minimum = 150
+
+    st.info(prompt)
+
+    if st.button(
+        "⏱️ Start 40-minute timer"
+    ):
+        start_timer(40)
+
+    show_timer()
+
+    essay = st.text_area(
+        "Write your answer",
+        height=450,
+        placeholder=(
+            "Introduction...\n\n"
+            "Body paragraph 1...\n\n"
+            "Body paragraph 2...\n\n"
+            "Conclusion..."
+        )
+    )
+
+    words = len(
+        essay.split()
+    )
+
+    st.write(
+        f"**Word count: {words}**"
+    )
+
+    if st.button(
+        "🔎 Analyse writing",
+        type="primary"
+    ):
+
+        if not essay.strip():
+
+            st.error(
+                "Please write something first."
+            )
+
+        else:
+
+            st.session_state.writing_count += 1
+
+            paragraphs = [
+                x
+                for x in essay.split("\n")
+                if x.strip()
+            ]
+
+            sentences = [
+                x
+                for x in essay
+                .replace("!", ".")
+                .replace("?", ".")
+                .split(".")
+                if x.strip()
+            ]
+
+            linking_words = [
+                "however",
+                "therefore",
+                "moreover",
+                "furthermore",
+                "although",
+                "while",
+                "whereas",
+                "consequently"
+            ]
+
+            used = [
+                word
+                for word in linking_words
+                if word in essay.lower()
+            ]
+
+            score = 6.0
+
+            if words >= minimum:
+                score += 0.5
+            else:
+                score -= 0.5
+
+            if len(paragraphs) >= 4:
+                score += 0.5
+
+            if len(sentences) >= 10:
+                score += 0.5
+
+            score = max(
+                4.0,
+                min(
+                    8.0,
+                    round(score * 2) / 2
+                )
+            )
+
+            save_result(
+                "Writing",
+                score,
+                f"{words} words"
+            )
+
+            st.success(
+                f"Practice estimate: **Band {score}**"
+            )
+
+            if words >= minimum:
+                st.success(
+                    "✅ Word-count target met."
+                )
+            else:
+                st.warning(
+                    "⚠️ Your answer is below "
+                    "the recommended word count."
+                )
+
+            if len(paragraphs) >= 4:
+                st.success(
+                    "✅ Paragraph structure looks good."
+                )
+            else:
+                st.warning(
+                    "⚠️ Develop clearer paragraphs."
+                )
+
+            if used:
+                st.success(
+                    "🔗 Linking words detected: "
+                    + ", ".join(used)
+                )
+            else:
+                st.warning(
+                    "🔗 Try using more cohesive devices."
+                )
+
+            st.info(
+                "This is automated practice feedback, "
+                "not an official IELTS examiner score."
+            )
+
+
+# =========================
+# SPEAKING
+# =========================
+
+elif st.session_state.page == "🗣️ Speaking":
+
+    mark_study()
+
+    st.title("🗣️ IELTS Speaking")
+
+    part = st.selectbox(
+        "Choose part",
+        [
+            "Part 1",
+            "Part 2",
+            "Part 3"
+        ]
+    )
+
+    if part == "Part 1":
+
+        topic = st.selectbox(
+            "Topic",
+            list(PART1.keys())
+        )
+
+        for question in PART1[topic]:
+            st.markdown(
+                f"**{question}**"
+            )
+
+        st.info(
+            "Try to answer each question "
+            "for 20–30 seconds."
+        )
+
+    elif part == "Part 2":
+
+        prompt = random.choice(
+            PART2
+        )
+
+        st.subheader(
+            "🎫 Cue Card"
+        )
+
+        st.write(
+            prompt
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            if st.button(
+                "⏱️ 1-minute preparation"
+            ):
+                start_timer(1)
+
+        with col2:
+
+            if st.button(
+                "🗣️ 2-minute speaking"
+            ):
+                start_timer(2)
+                st.session_state.speaking_count += 1
+
+        show_timer()
+
+    else:
+
+        for question in PART3:
+
+            st.markdown(
+                f"**{question}**"
+            )
+
+        st.info(
+            "Aim for 40–60 seconds per answer."
+        )
+
+    st.divider()
+
+    st.subheader(
+        "📊 Self assessment"
+    )
+
+    fluency = st.slider(
+        "Fluency",
+        1,
+        9,
+        6
+    )
+
+    vocabulary = st.slider(
+        "Vocabulary",
+        1,
+        9,
+        6
+    )
+
+    grammar = st.slider(
+        "Grammar",
+        1,
+        9,
+        6
+    )
+
+    pronunciation = st.slider(
+        "Pronunciation",
+        1,
+        9,
+        6
+    )
+
+    if st.button(
+        "Save speaking result"
+    ):
+
+        score = round(
+            (
+                fluency
+                + vocabulary
+                + grammar
+                + pronunciation
+            ) / 4 * 2
+        ) / 2
+
+        save_result(
+            "Speaking",
+            score,
+            "Self assessment"
+        )
+
+        st.success(
+            f"Practice Band: **{score}**"
+        )
+
+
+# =========================
+# VOCABULARY
+# =========================
+
+elif st.session_state.page == "📚 Vocabulary":
+
+    mark_study()
+
+    st.title(
+        "📚 IELTS Vocabulary"
+    )
+
+    search = st.text_input(
+        "Search vocabulary"
+    )
+
+    filtered = [
+        item
+        for item in VOCABULARY
+        if (
+            not search
+            or search.lower() in item[0].lower()
+            or search.lower() in item[1].lower()
+        )
+    ]
+
+    for word, meaning in filtered:
+
+        with st.expander(
+            f"**{word}** — {meaning}"
+        ):
+
+            st.write(
+                f"Example: This is a **{word}** issue."
+            )
+
+    st.divider()
+
+    st.subheader(
+        "🧠 Vocabulary Quiz"
+    )
+
+    word, meaning = random.choice(
+        VOCABULARY
+    )
+
+    wrong = random.sample(
+        [
+            item[1]
+            for item in VOCABULARY
+            if item[0] != word
+        ],
+        3
+    )
+
+    choices = [
+        meaning
+    ] + wrong
+
+    random.shuffle(
+        choices
+    )
+
+    answer = st.radio(
+        f"What does **{word}** mean?",
+        choices,
+        index=None
+    )
+
+    if st.button(
+        "Check answer"
+    ):
+
+        if answer == meaning:
+
+            st.success(
+                "🎉 Correct!"
+            )
+
+        else:
+
+            st.error(
+                f"Correct answer: {meaning}"
+            )
+
+
+# =========================
+# PROGRESS
+# =========================
+
+elif st.session_state.page == "📊 Progress":
+
+    st.title(
+        "📊 Progress Centre"
+    )
+
+    cols = st.columns(4)
+
+    for col, skill in zip(
+        cols,
+        [
+            "Reading",
+            "Listening",
+            "Writing",
+            "Speaking"
+        ]
+    ):
+
+        col.metric(
+            skill,
+            st.session_state.bands.get(
+                skill,
+                "—"
+            )
+        )
+
+    st.divider()
+
+    if st.session_state.bands:
+
+        average = sum(
+            st.session_state.bands.values()
+        ) / len(
+            st.session_state.bands
+        )
+
+        st.subheader(
+            f"Overall practice average: {average:.1f}"
+        )
+
+        st.progress(
+            min(
+                average / 9,
+                1
+            )
+        )
+
+        st.write(
+            f"Target Band: **{st.session_state.goal}**"
+        )
+
+    if st.session_state.history:
+
+        st.subheader(
+            "Practice history"
+        )
+
+        st.dataframe(
+            st.session_state.history,
+            use_container_width=True
+        )
+
+        st.line_chart(
+            [
+                x["Band"]
+                for x in st.session_state.history
+            ]
+        )
+
+    else:
+
+        st.info(
+            "Complete some practice first."
+        )
+
+
+# =========================
+# MISTAKE BOOK
+# =========================
+
+elif st.session_state.page == "❌ Mistake Book":
+
+    st.title(
+        "❌ Mistake Book"
+    )
+
+    if not st.session_state.mistakes:
+
+        st.success(
+            "No mistakes recorded yet. 🎉"
+        )
+
+    else:
+
+        st.write(
+            f"Total mistakes: "
+            f"**{len(st.session_state.mistakes)}**"
+        )
+
+        for i, mistake in enumerate(
+            reversed(
+                st.session_state.mistakes
+            ),
+            1
+        ):
+
+            with st.expander(
+                f"{i}. {mistake['skill']}"
+            ):
+
+                st.write(
+                    "**Question:**",
+                    mistake["question"]
+                )
+
+                st.write(
+                    "**Correct answer:**",
+                    mistake["answer"]
+                )
+
+
+# =========================
+# FOOTER
+# =========================
+
+st.divider()
+
+st.caption(
+    "IELTS Master V4 · Independent practice tool · "
+    "Not affiliated with IELTS, IDP, British Council or Cambridge."
+)
