@@ -1,1308 +1,1603 @@
 import streamlit as st
+import pandas as pd
+import numpy as np
+import json
+import os
 import random
-import time
-from datetime import date, datetime
+from datetime import datetime, date, timedelta
 
-# =========================
-# IELTS MASTER V4
-# =========================
+# ============================================================
+# SIMON IELTS 7.0
+# AI IELTS Learning Platform - One File Edition
+# ============================================================
 
 st.set_page_config(
-    page_title="IELTS Master V4",
+    page_title="Simon IELTS 7.0",
     page_icon="🎓",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# ---------- Session ----------
-defaults = {
-    "page": "Dashboard",
-    "name": "",
-    "goal": 6.5,
-    "bands": {},
-    "history": [],
-    "mistakes": [],
-    "timer_end": None,
-    "streak": 0,
-    "last_day": None,
-    "writing_count": 0,
-    "speaking_count": 0,
-    "vocab_score": 0,
+# ============================================================
+# STYLE
+# ============================================================
+
+st.markdown("""
+<style>
+.block-container {
+    max-width: 1500px;
+    padding-top: 1rem;
+    padding-bottom: 3rem;
 }
 
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
+.hero {
+    padding: 32px;
+    border-radius: 26px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(128,128,128,.22);
+    background: linear-gradient(
+        135deg,
+        rgba(60,100,210,.16),
+        rgba(150,70,190,.10)
+    );
+}
+
+.hero-title {
+    font-size: 46px;
+    font-weight: 900;
+    line-height: 1.1;
+}
+
+.hero-subtitle {
+    opacity: .65;
+    margin-top: 8px;
+}
+
+.card {
+    padding: 22px;
+    border-radius: 20px;
+    border: 1px solid rgba(128,128,128,.18);
+    background: rgba(128,128,128,.045);
+    margin-bottom: 15px;
+}
+
+.big-score {
+    font-size: 54px;
+    font-weight: 900;
+}
+
+.section-title {
+    font-size: 28px;
+    font-weight: 850;
+    margin-top: 10px;
+}
+
+.small {
+    opacity: .62;
+    font-size: 13px;
+}
+
+.badge {
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(100,100,100,.10);
+    display: inline-block;
+    margin-right: 5px;
+}
+
+.progress-label {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
-# ---------- Functions ----------
-def mark_study():
-    today = date.today().isoformat()
+# ============================================================
+# DATA STORAGE
+# ============================================================
 
-    if st.session_state.last_day != today:
-        st.session_state.streak += 1
-        st.session_state.last_day = today
+DATA_FILE = "simon_ielts_data.json"
 
 
-def start_timer(minutes):
-    st.session_state.timer_end = time.time() + minutes * 60
+def default_data():
+    return {
+        "target_score": 7.0,
+        "exam_date": "",
+        "daily_minutes": 90,
+        "level": "基础提升",
+        "streak": 0,
+        "study_minutes": 0,
+        "questions_done": 0,
+        "mistakes": [],
+        "vocabulary": [],
+        "study_log": [],
+        "scores": {
+            "Listening": 5.0,
+            "Reading": 5.0,
+            "Writing": 5.5,
+            "Speaking": 5.5
+        }
+    }
 
 
-def show_timer():
-    if st.session_state.timer_end is None:
-        return
+def load_data():
+    try:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
 
-    remaining = max(
-        0,
-        int(st.session_state.timer_end - time.time())
-    )
+            base = default_data()
 
-    if remaining == 0:
-        st.session_state.timer_end = None
-        st.error("⏰ Time is up!")
-    else:
-        minutes = remaining // 60
-        seconds = remaining % 60
+            for key, value in saved.items():
+                base[key] = value
 
-        st.warning(
-            f"⏱️ Time remaining: "
-            f"**{minutes:02d}:{seconds:02d}**"
-        )
+            return base
+
+    except Exception:
+        pass
+
+    return default_data()
 
 
-def estimate_band(correct, total):
-    if total == 0:
+def save_data(data):
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                data,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+    except Exception:
+        pass
+
+
+if "simon_data" not in st.session_state:
+    st.session_state.simon_data = load_data()
+
+data = st.session_state.simon_data
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def clamp(value, low=0, high=9):
+    return max(low, min(high, value))
+
+
+def band_round(value):
+    value = round(value * 2) / 2
+    return clamp(value, 0, 9)
+
+
+def overall_band(scores):
+    values = list(scores.values())
+
+    if not values:
         return 0
 
-    ratio = correct / total
-
-    if ratio >= 0.95:
-        return 9.0
-    elif ratio >= 0.90:
-        return 8.5
-    elif ratio >= 0.80:
-        return 7.5
-    elif ratio >= 0.70:
-        return 6.5
-    elif ratio >= 0.60:
-        return 6.0
-    elif ratio >= 0.50:
-        return 5.5
-    elif ratio >= 0.40:
-        return 5.0
-    elif ratio >= 0.30:
-        return 4.5
-    else:
-        return 4.0
+    return band_round(sum(values) / len(values))
 
 
-def save_result(skill, score, detail):
-    st.session_state.bands[skill] = score
+def days_until_exam(exam_date):
+    if not exam_date:
+        return None
 
-    st.session_state.history.append({
-        "Time": datetime.now().strftime(
-            "%Y-%m-%d %H:%M"
-        ),
-        "Skill": skill,
-        "Band": score,
-        "Detail": detail
+    try:
+        target = datetime.strptime(
+            exam_date,
+            "%Y-%m-%d"
+        ).date()
+
+        return (target - date.today()).days
+
+    except Exception:
+        return None
+
+
+def add_study_minutes(minutes):
+    data["study_minutes"] += int(minutes)
+
+    data["study_log"].append({
+        "date": str(date.today()),
+        "minutes": int(minutes)
     })
 
+    save_data(data)
 
-# =========================
-# DATA
-# =========================
 
-READING = [
+def add_mistake(subject, question_type, reason):
+    data["mistakes"].append({
+        "date": str(date.today()),
+        "subject": subject,
+        "type": question_type,
+        "reason": reason
+    })
+
+    save_data(data)
+
+
+def add_vocab(word, meaning, example=""):
+    data["vocabulary"].append({
+        "word": word,
+        "meaning": meaning,
+        "example": example,
+        "date": str(date.today())
+    })
+
+    save_data(data)
+
+
+def score_to_text(score):
+    if score >= 8.5:
+        return "卓越"
+    if score >= 7.5:
+        return "优秀"
+    if score >= 7:
+        return "目标水平"
+    if score >= 6.5:
+        return "接近目标"
+    if score >= 6:
+        return "中等"
+    if score >= 5:
+        return "需要强化"
+    return "基础阶段"
+
+
+# ============================================================
+# QUESTION BANK
+# ============================================================
+
+READING_QUESTIONS = [
     {
-        "title": "Urban Green Spaces",
-        "text": """
-Urban parks have changed considerably over the last two centuries.
-
-Early public parks were often created to provide attractive scenery
-and cleaner air for residents of crowded industrial cities.
-
-Today, urban green spaces have a much wider purpose.
-
-Trees can lower surface temperatures and provide shade.
-Plants may help manage rainwater and create habitats for insects
-and birds.
-
-Parks can also encourage walking, exercise and social interaction.
-
-However, parks require funding and maintenance.
-Attractive green areas may sometimes be followed by rising
-property prices.
-
-Modern planning therefore considers accessibility and inclusion.
-        """,
-        "questions": [
-            {
-                "q": "Early parks were partly created to provide:",
-                "options": [
-                    "Cleaner air and scenery",
-                    "Factories",
-                    "Shopping centres",
-                    "Private housing"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "Trees can help:",
-                "options": [
-                    "Increase traffic",
-                    "Lower surface temperatures",
-                    "Remove parks",
-                    "Increase pollution"
-                ],
-                "answer": 1
-            },
-            {
-                "q": "Parks can encourage:",
-                "options": [
-                    "Exercise",
-                    "Factory work",
-                    "Traffic",
-                    "Higher pollution"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "A possible problem is:",
-                "options": [
-                    "Rising property prices",
-                    "Less sunlight",
-                    "More factories",
-                    "Fewer buildings"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "Modern planning considers:",
-                "options": [
-                    "Accessibility",
-                    "Cars only",
-                    "Factories only",
-                    "Private ownership only"
-                ],
-                "answer": 0
-            }
-        ]
+        "question": "The passage states that early researchers underestimated the importance of sleep.",
+        "answer": "TRUE",
+        "type": "判断题",
+        "explanation": "定位原文时寻找表示 researchers / underestimated / sleep 的同义表达。"
     },
-
     {
-        "title": "Public Transport",
-        "text": """
-Cities are investing in public transport as populations grow.
+        "question": "The study involved fewer than 100 participants.",
+        "answer": "FALSE",
+        "type": "判断题",
+        "explanation": "数字类信息需要回原文核对，不能凭常识判断。"
+    },
+    {
+        "question": "Which factor is identified as the main reason for the change?",
+        "answer": "B",
+        "type": "选择题",
+        "explanation": "重点寻找表示原因、result、because、due to 的句子。"
+    },
+    {
+        "question": "Complete the sentence: Researchers found that regular exercise improved ______.",
+        "answer": "memory",
+        "type": "填空题",
+        "explanation": "注意题目要求的词性以及原文中的同义替换。"
+    },
+    {
+        "question": "Which paragraph discusses the historical development of the theory?",
+        "answer": "C",
+        "type": "段落匹配",
+        "explanation": "先寻找时间线、历史人物、早期研究等信号。"
+    }
+]
 
-Rail systems, buses and cycling networks can move large numbers
-of people while using less urban space than private cars.
-
-Infrastructure is expensive and new rail lines can take years
-to build.
-
-Nevertheless, reliable transport can create long-term economic
-benefits by connecting workers with employment and reducing
-congestion.
-
-Technology is changing transport too.
-
-Real-time information helps passengers plan journeys, while
-electronic ticketing can reduce queues.
-        """,
-        "questions": [
-            {
-                "q": "Public transport can use less space than:",
-                "options": [
-                    "Private cars",
-                    "Walking",
-                    "Cycling",
-                    "Trains"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "Infrastructure can be:",
-                "options": [
-                    "Free",
-                    "Expensive",
-                    "Unnecessary",
-                    "Temporary"
-                ],
-                "answer": 1
-            },
-            {
-                "q": "Reliable transport can:",
-                "options": [
-                    "Reduce congestion",
-                    "Increase pollution",
-                    "Remove jobs",
-                    "Stop technology"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "Real-time information helps passengers:",
-                "options": [
-                    "Plan journeys",
-                    "Buy houses",
-                    "Build trains",
-                    "Avoid transport"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "Electronic ticketing can:",
-                "options": [
-                    "Increase queues",
-                    "Reduce queues",
-                    "Remove buses",
-                    "Increase pollution"
-                ],
-                "answer": 1
-            }
-        ]
+LISTENING_QUESTIONS = [
+    {
+        "question": "The meeting will take place at ______.",
+        "answer": "10:30",
+        "type": "填空题",
+        "explanation": "时间题重点注意数字、am/pm以及自我修正。"
+    },
+    {
+        "question": "What does the speaker recommend?",
+        "answer": "B",
+        "type": "选择题",
+        "explanation": "注意 however、actually、but 等转折信号词。"
+    },
+    {
+        "question": "The new building is located near the ______.",
+        "answer": "station",
+        "type": "填空题",
+        "explanation": "地点类填空重点训练场景词汇和定位能力。"
+    },
+    {
+        "question": "Which activity is available on Friday?",
+        "answer": "C",
+        "type": "选择题",
+        "explanation": "听到多个选项时不要过早锁定答案。"
+    },
+    {
+        "question": "The customer needs to bring a valid ______.",
+        "answer": "passport",
+        "type": "填空题",
+        "explanation": "注意冠词以及名词单复数。"
     }
 ]
 
 
-LISTENING = [
-    {
-        "title": "Language Centre",
-        "transcript": """
-The student wants to improve speaking because lectures are easy
-to understand but presentations make the student nervous.
+# ============================================================
+# HEADER
+# ============================================================
 
-A presentation workshop runs on Thursday afternoon.
+st.markdown("""
+<div class="hero">
+    <div class="hero-subtitle">
+        SIMON IELTS 7.0 · AI-POWERED IELTS LEARNING PLATFORM
+    </div>
 
-However, the student has a laboratory class on Thursday.
+    <div class="hero-title">
+        🎓 Simon IELTS
+    </div>
 
-The adviser recommends a discussion group on Tuesday morning.
-
-Registration closes this Friday.
-
-There is no fee for enrolled students.
-        """,
-        "questions": [
-            {
-                "q": "What skill does the student want to improve?",
-                "options": [
-                    "Speaking",
-                    "Reading",
-                    "Writing",
-                    "Grammar"
-                ],
-                "answer": 0
-            },
-            {
-                "q": "When is the presentation workshop?",
-                "options": [
-                    "Monday",
-                    "Tuesday",
-                    "Thursday afternoon",
-                    "Friday"
-                ],
-                "answer": 2
-            },
-            {
-                "q": "Why can't the student attend?",
-                "options": [
-                    "Cost",
-                    "Laboratory class",
-                    "Work",
-                    "Travel"
-                ],
-                "answer": 1
-            },
-            {
-                "q": "When is the discussion group?",
-                "options": [
-                    "Monday morning",
-                    "Tuesday morning",
-                    "Thursday afternoon",
-                    "Friday morning"
-                ],
-                "answer": 1
-            },
-            {
-                "q": "When does registration close?",
-                "options": [
-                    "Today",
-                    "Monday",
-                    "This Friday",
-                    "Next month"
-                ],
-                "answer": 2
-            }
-        ]
-    }
-]
+    <div class="hero-subtitle">
+        Listening × Reading × Writing × Speaking × Mock × Planning × Growth
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
-VOCABULARY = [
-    ("crucial", "extremely important"),
-    ("allocate", "give a particular amount of time or money"),
-    ("substantial", "large in amount"),
-    ("deteriorate", "become worse"),
-    ("enhance", "improve something"),
-    ("contribute", "help cause something"),
-    ("sustainable", "able to continue without serious harm"),
-    ("perspective", "a particular way of viewing something"),
-    ("implement", "put a plan into action"),
-    ("inevitable", "certain to happen"),
-    ("mitigate", "reduce a harmful effect"),
-    ("coherent", "logical and well organised"),
-]
-
-
-PART1 = {
-    "Study": [
-        "What are you studying?",
-        "Why did you choose it?",
-        "What do you enjoy most about it?"
-    ],
-    "Hometown": [
-        "Where is your hometown?",
-        "What do you like about it?",
-        "Has it changed much?"
-    ],
-    "Technology": [
-        "What technology do you use every day?",
-        "Do you like new technology?",
-        "What technology would you like to learn?"
-    ]
-}
-
-
-PART2 = [
-    "Describe a useful website you often use.",
-    "Describe a place you enjoy visiting.",
-    "Describe a skill you would like to learn.",
-    "Describe an important decision you have made.",
-    "Describe a memorable journey."
-]
-
-
-PART3 = [
-    "Why do people find change difficult?",
-    "How can schools prepare students for future jobs?",
-    "Does technology always improve people's lives?",
-    "What are the advantages and disadvantages of large cities?"
-]
-
-
-# =========================
+# ============================================================
 # SIDEBAR
-# =========================
+# ============================================================
 
 with st.sidebar:
 
-    st.title("🎓 IELTS Master V4")
+    st.header("🎯 我的目标")
 
-    st.session_state.name = st.text_input(
-        "Your name",
-        st.session_state.name
+    target = st.number_input(
+        "目标总分",
+        min_value=4.0,
+        max_value=9.0,
+        value=float(data["target_score"]),
+        step=0.5
     )
 
-    st.session_state.goal = st.select_slider(
-        "Target Band",
-        options=[
-            5.0,
-            5.5,
-            6.0,
-            6.5,
-            7.0,
-            7.5,
-            8.0,
-            8.5,
-            9.0
+    if target != data["target_score"]:
+        data["target_score"] = target
+        save_data(data)
+
+    exam_date_input = st.date_input(
+        "考试日期",
+        value=(
+            datetime.strptime(
+                data["exam_date"],
+                "%Y-%m-%d"
+            ).date()
+            if data["exam_date"]
+            else date.today() + timedelta(days=45)
+        )
+    )
+
+    data["exam_date"] = str(exam_date_input)
+    save_data(data)
+
+    remaining = days_until_exam(
+        data["exam_date"]
+    )
+
+    if remaining is not None:
+        if remaining > 0:
+            st.info(f"⏳ 距离考试还有 **{remaining} 天**")
+        elif remaining == 0:
+            st.error("🔥 今天就是考试日！")
+        else:
+            st.warning("考试日期已经过去。")
+
+    st.divider()
+
+    st.header("⚙️ 学习设置")
+
+    data["daily_minutes"] = st.slider(
+        "每日学习时间",
+        15,
+        300,
+        int(data["daily_minutes"]),
+        15
+    )
+
+    data["level"] = st.selectbox(
+        "当前阶段",
+        [
+            "基础夯实",
+            "基础提升",
+            "强化提升",
+            "考前冲刺"
         ],
-        value=st.session_state.goal
+        index=[
+            "基础夯实",
+            "基础提升",
+            "强化提升",
+            "考前冲刺"
+        ].index(data["level"])
     )
 
-    st.divider()
-
-    pages = [
-        "Dashboard",
-        "📖 Reading",
-        "🎧 Listening",
-        "✍️ Writing",
-        "🗣️ Speaking",
-        "📚 Vocabulary",
-        "📊 Progress",
-        "❌ Mistake Book"
-    ]
-
-    for page in pages:
-        if st.button(
-            page,
-            use_container_width=True
-        ):
-            st.session_state.page = page
-            st.rerun()
+    save_data(data)
 
     st.divider()
+
+    st.caption("Simon IELTS 7.0")
+    st.caption("学习研究工具 · 非官方雅思评分")
+
+
+# ============================================================
+# TOP OVERVIEW
+# ============================================================
+
+scores = data["scores"]
+overall = overall_band(scores)
+
+c1, c2, c3, c4, c5 = st.columns(5)
+
+with c1:
+    st.metric(
+        "当前预计总分",
+        f"{overall:.1f}"
+    )
+
+with c2:
+    st.metric(
+        "目标总分",
+        f"{data['target_score']:.1f}"
+    )
+
+with c3:
+    gap = max(
+        0,
+        data["target_score"] - overall
+    )
 
     st.metric(
-        "🔥 Study streak",
-        f"{st.session_state.streak} day(s)"
+        "距离目标",
+        f"{gap:.1f}"
+    )
+
+with c4:
+    st.metric(
+        "学习时长",
+        f"{data['study_minutes']} min"
+    )
+
+with c5:
+    st.metric(
+        "完成题目",
+        data["questions_done"]
     )
 
 
-# =========================
+# ============================================================
+# NAVIGATION
+# ============================================================
+
+tabs = st.tabs([
+    "🏠 Dashboard",
+    "🎧 Listening",
+    "📖 Reading",
+    "✍️ Writing",
+    "🗣️ Speaking",
+    "📝 Mock Test",
+    "🧠 AI Planner",
+    "📚 Vocabulary",
+    "❌ Mistakes",
+    "📊 Growth"
+])
+
+
+# ============================================================
 # DASHBOARD
-# =========================
+# ============================================================
 
-if st.session_state.page == "Dashboard":
+with tabs[0]:
 
-    mark_study()
-
-    st.title("🎓 IELTS Master V4")
-
-    if st.session_state.name:
-        st.subheader(
-            f"Welcome back, {st.session_state.name} 👋"
-        )
-
-    st.write(
-        "Your complete IELTS practice dashboard."
+    st.markdown(
+        '<div class="section-title">🏠 Simon Learning Dashboard</div>',
+        unsafe_allow_html=True
     )
 
-    st.divider()
+    left, right = st.columns([1.4, 1])
 
-    cols = st.columns(4)
+    with left:
 
-    for col, skill in zip(
-        cols,
-        ["Reading", "Listening", "Writing", "Speaking"]
-    ):
-        value = st.session_state.bands.get(
-            skill,
-            "—"
+        st.markdown(
+            '<div class="card">',
+            unsafe_allow_html=True
         )
 
-        col.metric(
-            skill,
-            value
+        st.markdown("### 🎯 今日学习任务")
+
+        weakest = min(
+            scores,
+            key=scores.get
         )
 
-    st.divider()
+        tasks = {
+            "Listening": [
+                "精听 10 分钟",
+                "完成 10 道听力题",
+                "整理 5 个场景词"
+            ],
+            "Reading": [
+                "完成 1 篇阅读",
+                "训练 Heading",
+                "整理 10 个同义替换"
+            ],
+            "Writing": [
+                "完成 Task 2 大纲",
+                "写 250+ 词作文",
+                "检查语法与衔接"
+            ],
+            "Speaking": [
+                "Part 1 热身",
+                "完成 1 个 Cue Card",
+                "进行 5 分钟自由表达"
+            ]
+        }
 
-    values = list(
-        st.session_state.bands.values()
-    )
-
-    if values:
-
-        average = sum(values) / len(values)
-
-        st.subheader(
-            f"🎯 Current average: {average:.1f}"
-        )
-
-        st.progress(
-            min(average / 9, 1)
-        )
-
-        gap = max(
-            0,
-            st.session_state.goal - average
-        )
-
-        st.write(
-            f"Target: **{st.session_state.goal:.1f}**"
-        )
-
-        st.write(
-            f"Remaining gap: **{gap:.1f}**"
-        )
-
-    else:
+        for task in tasks[weakest]:
+            st.checkbox(
+                task,
+                key=f"task_{task}"
+            )
 
         st.info(
-            "Complete your first practice test "
-            "to establish a baseline."
+            f"🧠 Simon 判断：目前最值得投入时间的科目是 **{weakest}**。"
         )
 
-    st.divider()
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-    st.subheader("🚀 Recommended routine")
+    with right:
 
-    st.write(
-        """
-        **10 min Reading**
-        → **10 min Listening**
-        → **10 min Vocabulary**
-        → **10 min Speaking**
-        """
+        st.markdown(
+            '<div class="card">',
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### 📡 四科能力")
+
+        for subject, value in scores.items():
+
+            st.markdown(
+                f"**{subject} · {value:.1f}**"
+            )
+
+            st.progress(
+                int(value / 9 * 100)
+            )
+
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown("### 🧭 Simon 学习优先级")
+
+    priority = pd.DataFrame({
+        "科目": list(scores.keys()),
+        "当前分数": list(scores.values()),
+        "目标差距": [
+            round(max(0, data["target_score"] - x), 1)
+            for x in scores.values()
+        ]
+    })
+
+    priority["优先级"] = (
+        priority["目标差距"]
+        .rank(
+            ascending=False,
+            method="min"
+        )
+        .astype(int)
+    )
+
+    priority = priority.sort_values(
+        "优先级"
+    )
+
+    st.dataframe(
+        priority,
+        use_container_width=True,
+        hide_index=True
     )
 
 
-# =========================
-# READING
-# =========================
-
-elif st.session_state.page == "📖 Reading":
-
-    mark_study()
-
-    st.title("📖 IELTS Reading")
-
-    passage = st.selectbox(
-        "Choose passage",
-        READING,
-        format_func=lambda x: x["title"]
-    )
-
-    if st.button(
-        "⏱️ Start 20-minute timer"
-    ):
-        start_timer(20)
-
-    show_timer()
-
-    st.subheader(
-        passage["title"]
-    )
-
-    st.write(
-        passage["text"]
-    )
-
-    st.divider()
-
-    answers = []
-
-    for i, question in enumerate(
-        passage["questions"]
-    ):
-
-        answer = st.radio(
-            f"{i + 1}. {question['q']}",
-            question["options"],
-            index=None,
-            key=f"reading_{passage['title']}_{i}"
-        )
-
-        answers.append(answer)
-
-    if st.button(
-        "✅ Submit Reading",
-        type="primary"
-    ):
-
-        correct = 0
-
-        for answer, question in zip(
-            answers,
-            passage["questions"]
-        ):
-
-            if (
-                answer
-                == question["options"][
-                    question["answer"]
-                ]
-            ):
-                correct += 1
-
-        total = len(
-            passage["questions"]
-        )
-
-        score = estimate_band(
-            correct,
-            total
-        )
-
-        save_result(
-            "Reading",
-            score,
-            f"{correct}/{total}"
-        )
-
-        st.success(
-            f"Score: **{correct}/{total}**"
-        )
-
-        st.success(
-            f"Estimated practice Band: **{score}**"
-        )
-
-        for answer, question in zip(
-            answers,
-            passage["questions"]
-        ):
-
-            correct_answer = question[
-                "options"
-            ][question["answer"]]
-
-            if answer != correct_answer:
-
-                st.session_state.mistakes.append(
-                    {
-                        "skill": "Reading",
-                        "question": question["q"],
-                        "answer": correct_answer
-                    }
-                )
-
-
-# =========================
+# ============================================================
 # LISTENING
-# =========================
+# ============================================================
 
-elif st.session_state.page == "🎧 Listening":
+with tabs[1]:
 
-    mark_study()
+    st.markdown(
+        '<div class="section-title">🎧 AI Listening Lab</div>',
+        unsafe_allow_html=True
+    )
 
-    st.title("🎧 IELTS Listening")
+    mode = st.selectbox(
+        "训练模式",
+        [
+            "精听",
+            "泛听",
+            "听写",
+            "题型专项",
+            "模拟测试"
+        ]
+    )
 
-    section = st.selectbox(
-        "Choose section",
-        LISTENING,
-        format_func=lambda x: x["title"]
+    question = random.choice(
+        LISTENING_QUESTIONS
     )
 
     st.info(
-        "For realistic practice, use your own recording. "
-        "The transcript is available for study."
+        f"当前题型：{question['type']}"
     )
 
-    audio = st.file_uploader(
-        "Upload audio",
-        type=[
-            "mp3",
-            "wav",
-            "m4a"
-        ]
+    st.markdown(
+        f"### {question['question']}"
     )
 
-    if audio:
-        st.audio(audio)
-
-    if st.checkbox(
-        "Show transcript"
-    ):
-        st.write(
-            section["transcript"]
-        )
-
-    st.divider()
-
-    answers = []
-
-    for i, question in enumerate(
-        section["questions"]
-    ):
-
-        answer = st.radio(
-            f"{i + 1}. {question['q']}",
-            question["options"],
-            index=None,
-            key=f"listen_{section['title']}_{i}"
-        )
-
-        answers.append(answer)
-
-    if st.button(
-        "✅ Submit Listening",
-        type="primary"
-    ):
-
-        correct = 0
-
-        for answer, question in zip(
-            answers,
-            section["questions"]
-        ):
-
-            if (
-                answer
-                == question["options"][
-                    question["answer"]
-                ]
-            ):
-                correct += 1
-
-        total = len(
-            section["questions"]
-        )
-
-        score = estimate_band(
-            correct,
-            total
-        )
-
-        save_result(
-            "Listening",
-            score,
-            f"{correct}/{total}"
-        )
-
-        st.success(
-            f"Score: **{correct}/{total}**"
-        )
-
-        st.success(
-            f"Estimated practice Band: **{score}**"
-        )
-
-
-# =========================
-# WRITING
-# =========================
-
-elif st.session_state.page == "✍️ Writing":
-
-    mark_study()
-
-    st.title("✍️ IELTS Writing")
-
-    task = st.selectbox(
-        "Choose task",
-        [
-            "Task 1 — Academic",
-            "Task 1 — General Training",
-            "Task 2 — Essay"
-        ]
-    )
-
-    if task == "Task 2 — Essay":
-
-        prompt = """
-Some people believe that students should study
-only subjects that are useful for their future careers.
-
-Others believe that students should study
-a wide range of subjects.
-
-Discuss both views and give your own opinion.
-        """
-
-        minimum = 250
-
-    elif task == "Task 1 — Academic":
-
-        prompt = """
-The chart below shows changes in the percentage
-of people using different forms of transport.
-
-Summarise the main features and make comparisons
-where relevant.
-        """
-
-        minimum = 150
-
-    else:
-
-        prompt = """
-Write a letter to a friend who is visiting your city.
-
-Recommend a place to visit and explain
-what they can do there.
-        """
-
-        minimum = 150
-
-    st.info(prompt)
-
-    if st.button(
-        "⏱️ Start 40-minute timer"
-    ):
-        start_timer(40)
-
-    show_timer()
-
-    essay = st.text_area(
-        "Write your answer",
-        height=450,
-        placeholder=(
-            "Introduction...\n\n"
-            "Body paragraph 1...\n\n"
-            "Body paragraph 2...\n\n"
-            "Conclusion..."
-        )
-    )
-
-    words = len(
-        essay.split()
-    )
-
-    st.write(
-        f"**Word count: {words}**"
+    answer = st.text_input(
+        "你的答案"
     )
 
     if st.button(
-        "🔎 Analyse writing",
-        type="primary"
+        "检查答案",
+        key="listen_check"
     ):
 
-        if not essay.strip():
+        correct = (
+            answer.strip().lower()
+            == question["answer"].lower()
+        )
 
-            st.error(
-                "Please write something first."
+        data["questions_done"] += 1
+
+        if correct:
+
+            st.success(
+                "🎉 正确！"
             )
 
         else:
 
-            st.session_state.writing_count += 1
+            st.error(
+                f"❌ 不正确。参考答案：**{question['answer']}**"
+            )
 
-            paragraphs = [
-                x
-                for x in essay.split("\n")
-                if x.strip()
-            ]
+            reason = st.selectbox(
+                "这道题为什么错？",
+                [
+                    "词汇不认识",
+                    "定位失败",
+                    "听不清",
+                    "拼写错误",
+                    "同义替换没识别",
+                    "注意力分散"
+                ],
+                key="listen_reason"
+            )
 
-            sentences = [
-                x
-                for x in essay
-                .replace("!", ".")
-                .replace("?", ".")
-                .split(".")
-                if x.strip()
-            ]
+            if st.button(
+                "保存到错题本",
+                key="listen_save"
+            ):
 
-            linking_words = [
-                "however",
-                "therefore",
-                "moreover",
-                "furthermore",
-                "although",
-                "while",
-                "whereas",
-                "consequently"
-            ]
-
-            used = [
-                word
-                for word in linking_words
-                if word in essay.lower()
-            ]
-
-            score = 6.0
-
-            if words >= minimum:
-                score += 0.5
-            else:
-                score -= 0.5
-
-            if len(paragraphs) >= 4:
-                score += 0.5
-
-            if len(sentences) >= 10:
-                score += 0.5
-
-            score = max(
-                4.0,
-                min(
-                    8.0,
-                    round(score * 2) / 2
+                add_mistake(
+                    "Listening",
+                    question["type"],
+                    reason
                 )
-            )
 
-            save_result(
-                "Writing",
-                score,
-                f"{words} words"
-            )
-
-            st.success(
-                f"Practice estimate: **Band {score}**"
-            )
-
-            if words >= minimum:
                 st.success(
-                    "✅ Word-count target met."
+                    "已加入错题本。"
                 )
-            else:
-                st.warning(
-                    "⚠️ Your answer is below "
-                    "the recommended word count."
-                )
-
-            if len(paragraphs) >= 4:
-                st.success(
-                    "✅ Paragraph structure looks good."
-                )
-            else:
-                st.warning(
-                    "⚠️ Develop clearer paragraphs."
-                )
-
-            if used:
-                st.success(
-                    "🔗 Linking words detected: "
-                    + ", ".join(used)
-                )
-            else:
-                st.warning(
-                    "🔗 Try using more cohesive devices."
-                )
-
-            st.info(
-                "This is automated practice feedback, "
-                "not an official IELTS examiner score."
-            )
-
-
-# =========================
-# SPEAKING
-# =========================
-
-elif st.session_state.page == "🗣️ Speaking":
-
-    mark_study()
-
-    st.title("🗣️ IELTS Speaking")
-
-    part = st.selectbox(
-        "Choose part",
-        [
-            "Part 1",
-            "Part 2",
-            "Part 3"
-        ]
-    )
-
-    if part == "Part 1":
-
-        topic = st.selectbox(
-            "Topic",
-            list(PART1.keys())
-        )
-
-        for question in PART1[topic]:
-            st.markdown(
-                f"**{question}**"
-            )
-
-        st.info(
-            "Try to answer each question "
-            "for 20–30 seconds."
-        )
-
-    elif part == "Part 2":
-
-        prompt = random.choice(
-            PART2
-        )
-
-        st.subheader(
-            "🎫 Cue Card"
-        )
 
         st.write(
-            prompt
+            f"🧠 AI解析：{question['explanation']}"
         )
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-
-            if st.button(
-                "⏱️ 1-minute preparation"
-            ):
-                start_timer(1)
-
-        with col2:
-
-            if st.button(
-                "🗣️ 2-minute speaking"
-            ):
-                start_timer(2)
-                st.session_state.speaking_count += 1
-
-        show_timer()
-
-    else:
-
-        for question in PART3:
-
-            st.markdown(
-                f"**{question}**"
-            )
-
-        st.info(
-            "Aim for 40–60 seconds per answer."
-        )
+        save_data(data)
 
     st.divider()
 
-    st.subheader(
-        "📊 Self assessment"
+    st.markdown("### 🎙️ Listening Training")
+
+    st.write(
+        "这里预留音频播放器、逐句字幕、AB复读、变速播放、AI口音分析接口。"
     )
 
-    fluency = st.slider(
-        "Fluency",
-        1,
-        9,
-        6
+    speed = st.slider(
+        "播放速度",
+        0.8,
+        1.5,
+        1.0,
+        0.1
     )
 
-    vocabulary = st.slider(
-        "Vocabulary",
-        1,
-        9,
-        6
+    st.caption(
+        f"当前训练速度：{speed:.1f}x"
     )
 
-    grammar = st.slider(
-        "Grammar",
-        1,
-        9,
-        6
+
+# ============================================================
+# READING
+# ============================================================
+
+with tabs[2]:
+
+    st.markdown(
+        '<div class="section-title">📖 AI Reading Lab</div>',
+        unsafe_allow_html=True
     )
 
-    pronunciation = st.slider(
-        "Pronunciation",
-        1,
-        9,
-        6
+    exam_type = st.radio(
+        "考试类型",
+        ["A类 Academic", "G类 General Training"],
+        horizontal=True
+    )
+
+    reading_mode = st.selectbox(
+        "训练模式",
+        [
+            "计时训练",
+            "精读",
+            "题型专项",
+            "文章结构分析"
+        ]
+    )
+
+    question = random.choice(
+        READING_QUESTIONS
+    )
+
+    st.info(
+        f"{exam_type} · {reading_mode} · {question['type']}"
+    )
+
+    st.markdown(
+        f"### {question['question']}"
+    )
+
+    if question["type"] in ["判断题"]:
+        answer = st.radio(
+            "选择答案",
+            ["TRUE", "FALSE", "NOT GIVEN"],
+            key="reading_answer"
+        )
+
+    elif question["type"] in ["选择题", "段落匹配"]:
+        answer = st.radio(
+            "选择答案",
+            ["A", "B", "C", "D"],
+            key="reading_answer"
+        )
+
+    else:
+        answer = st.text_input(
+            "填写答案",
+            key="reading_answer_text"
+        )
+
+    if st.button(
+        "提交答案",
+        key="reading_submit"
+    ):
+
+        correct = (
+            str(answer).strip().lower()
+            == question["answer"].lower()
+        )
+
+        data["questions_done"] += 1
+
+        if correct:
+            st.success("🎉 正确！")
+        else:
+            st.error(
+                f"❌ 答错。参考答案：{question['answer']}"
+            )
+
+            reason = st.selectbox(
+                "错误原因",
+                [
+                    "定位错误",
+                    "同义替换",
+                    "过度推断",
+                    "词汇问题",
+                    "文章结构理解错误",
+                    "粗心"
+                ],
+                key="reading_reason"
+            )
+
+            if st.button(
+                "保存错题",
+                key="reading_save"
+            ):
+
+                add_mistake(
+                    "Reading",
+                    question["type"],
+                    reason
+                )
+
+                st.success(
+                    "已保存。"
+                )
+
+        st.write(
+            f"🧠 解析：{question['explanation']}"
+        )
+
+        save_data(data)
+
+    st.divider()
+
+    st.markdown("### 🔎 AI 同义替换训练")
+
+    synonym_pairs = pd.DataFrame({
+        "题干": [
+            "important",
+            "increase",
+            "problem",
+            "show",
+            "reduce"
+        ],
+        "高频替换": [
+            "significant",
+            "rise / grow",
+            "issue",
+            "demonstrate",
+            "decrease / diminish"
+        ]
+    })
+
+    st.dataframe(
+        synonym_pairs,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ============================================================
+# WRITING
+# ============================================================
+
+with tabs[3]:
+
+    st.markdown(
+        '<div class="section-title">✍️ AI Writing Lab</div>',
+        unsafe_allow_html=True
+    )
+
+    writing_task = st.selectbox(
+        "任务",
+        [
+            "Task 1 - 图表",
+            "Task 1 - 流程图",
+            "Task 1 - 地图",
+            "Task 2 - Opinion",
+            "Task 2 - Discussion",
+            "Task 2 - Advantages / Disadvantages",
+            "Task 2 - Problems / Solutions"
+        ]
+    )
+
+    writing_topic = st.selectbox(
+        "训练题目",
+        [
+            "Some people believe technology makes life easier. Discuss both views.",
+            "Should governments spend more money on public transport?",
+            "Is studying abroad beneficial for young people?",
+            "Do the advantages of social media outweigh the disadvantages?"
+        ]
+    )
+
+    st.info(
+        f"当前任务：{writing_task}"
+    )
+
+    st.markdown(
+        f"### 📝 {writing_topic}"
+    )
+
+    writing = st.text_area(
+        "开始写作",
+        height=420,
+        placeholder="在这里输入你的作文……"
+    )
+
+    word_count = len(
+        writing.split()
+    )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.metric(
+            "Word Count",
+            word_count
+        )
+
+    with c2:
+        remaining_words = max(
+            0,
+            250 - word_count
+        )
+
+        st.metric(
+            "距离250词",
+            remaining_words
+        )
+
+    if st.button(
+        "🧠 Simon AI 初步批改",
+        type="primary",
+        key="writing_review"
+    ):
+
+        if word_count < 50:
+
+            st.warning(
+                "作文太短，至少输入一段完整答案后再分析。"
+            )
+
+        else:
+
+            grammar_score = 5.5
+
+            if word_count >= 250:
+                grammar_score += 0.5
+
+            if any(
+                word in writing.lower()
+                for word in [
+                    "however",
+                    "therefore",
+                    "although",
+                    "moreover"
+                ]
+            ):
+                grammar_score += 0.5
+
+            grammar_score = min(
+                grammar_score,
+                7.5
+            )
+
+            st.success(
+                f"初步估计：Band **{grammar_score:.1f}** 左右"
+            )
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(
+                    "TR / TA",
+                    "6.0"
+                )
+
+            with col2:
+                st.metric(
+                    "CC",
+                    "6.0"
+                )
+
+            with col3:
+                st.metric(
+                    "LR",
+                    "6.0"
+                )
+
+            with col4:
+                st.metric(
+                    "GRA",
+                    f"{grammar_score:.1f}"
+                )
+
+            st.markdown("### 🎯 提分优先级")
+
+            st.write(
+                """
+                **1. 先保证任务完成度。**
+
+                **2. 再提升段落逻辑。**
+
+                **3. 再处理词汇丰富度。**
+
+                **4. 最后系统提升复杂句与语法准确率。**
+                """
+            )
+
+            st.warning(
+                "当前评分属于学习辅助估计，不等同于雅思官方评分。"
+            )
+
+
+# ============================================================
+# SPEAKING
+# ============================================================
+
+with tabs[4]:
+
+    st.markdown(
+        '<div class="section-title">🗣️ AI Speaking Lab</div>',
+        unsafe_allow_html=True
+    )
+
+    speaking_part = st.selectbox(
+        "Part",
+        ["Part 1", "Part 2", "Part 3"]
+    )
+
+    topics = {
+        "Part 1": [
+            "Do you like studying English?",
+            "What do you usually do at weekends?",
+            "Do you like travelling?"
+        ],
+        "Part 2": [
+            "Describe a place you would like to visit.",
+            "Describe a useful piece of technology.",
+            "Describe a person who influenced you."
+        ],
+        "Part 3": [
+            "Why do people travel more today?",
+            "How has technology changed education?",
+            "Should governments invest more in tourism?"
+        ]
+    }
+
+    topic = random.choice(
+        topics[speaking_part]
+    )
+
+    st.info(
+        topic
+    )
+
+    if speaking_part == "Part 2":
+
+        st.warning(
+            "⏱️ 1分钟准备 + 2分钟回答"
+        )
+
+        preparation = st.slider(
+            "准备时间",
+            0,
+            60,
+            60
+        )
+
+        st.caption(
+            f"准备时间：{preparation} 秒"
+        )
+
+    answer = st.text_area(
+        "输入你的回答（语音模块将在后续版本接入）",
+        height=260
     )
 
     if st.button(
-        "Save speaking result"
+        "🧠 Analyze Speaking",
+        type="primary",
+        key="speaking_analyze"
     ):
 
-        score = round(
+        word_count = len(
+            answer.split()
+        )
+
+        fluency = 5.5
+        vocabulary = 5.5
+        grammar = 5.5
+        pronunciation = 5.5
+
+        if word_count >= 80:
+            fluency += 0.5
+
+        if word_count >= 120:
+            vocabulary += 0.5
+
+        if any(
+            word in answer.lower()
+            for word in [
+                "because",
+                "although",
+                "however",
+                "therefore",
+                "which"
+            ]
+        ):
+            grammar += 0.5
+
+        speaking_score = band_round(
             (
                 fluency
                 + vocabulary
                 + grammar
                 + pronunciation
-            ) / 4 * 2
-        ) / 2
+            ) / 4
+        )
 
-        save_result(
-            "Speaking",
-            score,
-            "Self assessment"
+        c1, c2, c3, c4 = st.columns(4)
+
+        c1.metric(
+            "Pronunciation",
+            f"{pronunciation:.1f}"
+        )
+
+        c2.metric(
+            "Fluency",
+            f"{fluency:.1f}"
+        )
+
+        c3.metric(
+            "Vocabulary",
+            f"{vocabulary:.1f}"
+        )
+
+        c4.metric(
+            "Grammar",
+            f"{grammar:.1f}"
         )
 
         st.success(
-            f"Practice Band: **{score}**"
+            f"预计 Speaking：Band **{speaking_score:.1f}**"
+        )
+
+        st.markdown("### 💡 Simon建议")
+
+        st.write(
+            """
+            - 减少过短回答
+            - 增加具体例子
+            - 使用 because / although / which 等复杂结构
+            - 避免重复使用 very / good / bad / nice
+            - Part 3 要进一步解释“为什么”
+            """
         )
 
 
-# =========================
-# VOCABULARY
-# =========================
+# ============================================================
+# MOCK TEST
+# ============================================================
 
-elif st.session_state.page == "📚 Vocabulary":
+with tabs[5]:
 
-    mark_study()
-
-    st.title(
-        "📚 IELTS Vocabulary"
+    st.markdown(
+        '<div class="section-title">📝 Simon Mock Test</div>',
+        unsafe_allow_html=True
     )
 
-    search = st.text_input(
-        "Search vocabulary"
-    )
-
-    filtered = [
-        item
-        for item in VOCABULARY
-        if (
-            not search
-            or search.lower() in item[0].lower()
-            or search.lower() in item[1].lower()
-        )
-    ]
-
-    for word, meaning in filtered:
-
-        with st.expander(
-            f"**{word}** — {meaning}"
-        ):
-
-            st.write(
-                f"Example: This is a **{word}** issue."
-            )
-
-    st.divider()
-
-    st.subheader(
-        "🧠 Vocabulary Quiz"
-    )
-
-    word, meaning = random.choice(
-        VOCABULARY
-    )
-
-    wrong = random.sample(
+    mock_type = st.selectbox(
+        "模考类型",
         [
-            item[1]
-            for item in VOCABULARY
-            if item[0] != word
-        ],
-        3
-    )
-
-    choices = [
-        meaning
-    ] + wrong
-
-    random.shuffle(
-        choices
-    )
-
-    answer = st.radio(
-        f"What does **{word}** mean?",
-        choices,
-        index=None
-    )
-
-    if st.button(
-        "Check answer"
-    ):
-
-        if answer == meaning:
-
-            st.success(
-                "🎉 Correct!"
-            )
-
-        else:
-
-            st.error(
-                f"Correct answer: {meaning}"
-            )
-
-
-# =========================
-# PROGRESS
-# =========================
-
-elif st.session_state.page == "📊 Progress":
-
-    st.title(
-        "📊 Progress Centre"
-    )
-
-    cols = st.columns(4)
-
-    for col, skill in zip(
-        cols,
-        [
-            "Reading",
+            "完整四科",
             "Listening",
+            "Reading",
             "Writing",
             "Speaking"
         ]
+    )
+
+    duration = {
+        "完整四科": 165,
+        "Listening": 40,
+        "Reading": 60,
+        "Writing": 60,
+        "Speaking": 15
+    }[mock_type]
+
+    st.metric(
+        "模拟考试时间",
+        f"{duration} 分钟"
+    )
+
+    st.warning(
+        "正式模考模式将在后续版本加入完整计时、自动提交、成绩报告和能力画像。"
+    )
+
+    if st.button(
+        "🚀 Start Mock Test",
+        type="primary"
     ):
 
-        col.metric(
-            skill,
-            st.session_state.bands.get(
-                skill,
-                "—"
-            )
+        st.session_state.mock_started = True
+
+    if st.session_state.get(
+        "mock_started",
+        False
+    ):
+
+        st.success(
+            "模考已开始。"
         )
 
-    st.divider()
-
-    if st.session_state.bands:
-
-        average = sum(
-            st.session_state.bands.values()
-        ) / len(
-            st.session_state.bands
+        st.progress(
+            0.01
         )
 
-        st.subheader(
-            f"Overall practice average: {average:.1f}"
+        st.info(
+            "当前为 V1 模考框架，后续会接入完整题库与自动计分系统。"
+        )
+
+
+# ============================================================
+# AI PLANNER
+# ============================================================
+
+with tabs[6]:
+
+    st.markdown(
+        '<div class="section-title">🧠 Simon AI Study Planner</div>',
+        unsafe_allow_html=True
+    )
+
+    remaining = days_until_exam(
+        data["exam_date"]
+    )
+
+    if remaining is None:
+        remaining = 45
+
+    weakest = min(
+        scores,
+        key=scores.get
+    )
+
+    strongest = max(
+        scores,
+        key=scores.get
+    )
+
+    st.markdown(
+        f"""
+        <div class="card">
+        <b>Simon Diagnosis</b><br><br>
+        目标：Band {data['target_score']:.1f}<br>
+        当前：Band {overall:.1f}<br>
+        距考试：{remaining} 天<br>
+        最弱科目：{weakest}<br>
+        最强科目：{strongest}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("### 📅 今日建议")
+
+    if remaining <= 14:
+
+        plan = [
+            ("Listening", 25),
+            ("Reading", 25),
+            ("Writing", 30),
+            ("Speaking", 20)
+        ]
+
+    elif remaining <= 45:
+
+        plan = [
+            ("Listening", 20),
+            ("Reading", 25),
+            ("Writing", 30),
+            ("Speaking", 25)
+        ]
+
+    else:
+
+        plan = [
+            ("Listening", 20),
+            ("Reading", 20),
+            ("Writing", 30),
+            ("Speaking", 30)
+        ]
+
+    for subject, minutes in plan:
+
+        if subject == weakest:
+            minutes += 15
+
+        st.write(
+            f"**{subject}** · {minutes} 分钟"
         )
 
         st.progress(
             min(
-                average / 9,
-                1
+                100,
+                int(minutes / data["daily_minutes"] * 100)
             )
         )
 
-        st.write(
-            f"Target Band: **{st.session_state.goal}**"
+    st.divider()
+
+    st.markdown("### 🎯 目标分拆解")
+
+    target_table = pd.DataFrame({
+        "科目": list(scores.keys()),
+        "当前": list(scores.values()),
+        "目标": [
+            data["target_score"]
+            for _ in scores
+        ],
+        "提升空间": [
+            round(
+                max(
+                    0,
+                    data["target_score"] - score
+                ),
+                1
+            )
+            for score in scores.values()
+        ]
+    })
+
+    st.dataframe(
+        target_table,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    if st.button(
+        "🔥 完成今日学习",
+        type="primary"
+    ):
+
+        add_study_minutes(
+            data["daily_minutes"]
         )
 
-    if st.session_state.history:
+        st.success(
+            "今日学习已记录！继续保持。"
+        )
 
-        st.subheader(
-            "Practice history"
+
+# ============================================================
+# VOCABULARY
+# ============================================================
+
+with tabs[7]:
+
+    st.markdown(
+        '<div class="section-title">📚 Simon Vocabulary Brain</div>',
+        unsafe_allow_html=True
+    )
+
+    word = st.text_input(
+        "单词"
+    )
+
+    meaning = st.text_input(
+        "中文含义"
+    )
+
+    example = st.text_input(
+        "例句"
+    )
+
+    if st.button(
+        "➕ 加入生词本",
+        key="add_vocab"
+    ):
+
+        if word:
+
+            add_vocab(
+                word,
+                meaning,
+                example
+            )
+
+            st.success(
+                f"{word} 已加入生词本。"
+            )
+
+    st.divider()
+
+    if data["vocabulary"]:
+
+        vocab_df = pd.DataFrame(
+            data["vocabulary"]
         )
 
         st.dataframe(
-            st.session_state.history,
-            use_container_width=True
-        )
-
-        st.line_chart(
-            [
-                x["Band"]
-                for x in st.session_state.history
-            ]
+            vocab_df,
+            use_container_width=True,
+            hide_index=True
         )
 
     else:
 
         st.info(
-            "Complete some practice first."
+            "你的生词本还是空的。"
         )
 
+    st.markdown("### 🧠 高频雅思词")
 
-# =========================
-# MISTAKE BOOK
-# =========================
+    common_words = pd.DataFrame({
+        "Word": [
+            "significant",
+            "substantial",
+            "consequently",
+            "contribute",
+            "decline",
+            "implement",
+            "sustainable",
+            "controversial"
+        ],
+        "Meaning": [
+            "重要的；显著的",
+            "大量的；重大的",
+            "因此",
+            "促进；贡献",
+            "下降",
+            "实施",
+            "可持续的",
+            "有争议的"
+        ]
+    })
 
-elif st.session_state.page == "❌ Mistake Book":
-
-    st.title(
-        "❌ Mistake Book"
+    st.dataframe(
+        common_words,
+        use_container_width=True,
+        hide_index=True
     )
 
-    if not st.session_state.mistakes:
 
-        st.success(
-            "No mistakes recorded yet. 🎉"
+# ============================================================
+# MISTAKES
+# ============================================================
+
+with tabs[8]:
+
+    st.markdown(
+        '<div class="section-title">❌ Simon Intelligent Mistake Book</div>',
+        unsafe_allow_html=True
+    )
+
+    if data["mistakes"]:
+
+        mistakes_df = pd.DataFrame(
+            data["mistakes"]
+        )
+
+        st.dataframe(
+            mistakes_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.markdown("### 🔍 错题归因")
+
+        reason_counts = (
+            mistakes_df["reason"]
+            .value_counts()
+        )
+
+        st.bar_chart(
+            reason_counts
+        )
+
+        most_common = reason_counts.index[0]
+
+        st.warning(
+            f"你的主要错误类型：**{most_common}**"
+        )
+
+        st.info(
+            "Simon建议：不要只重做错题，要优先解决造成错误的底层能力。"
         )
 
     else:
 
-        st.write(
-            f"Total mistakes: "
-            f"**{len(st.session_state.mistakes)}**"
+        st.info(
+            "目前还没有错题记录。"
         )
 
-        for i, mistake in enumerate(
-            reversed(
-                st.session_state.mistakes
-            ),
-            1
-        ):
 
-            with st.expander(
-                f"{i}. {mistake['skill']}"
-            ):
+# ============================================================
+# GROWTH
+# ============================================================
 
-                st.write(
-                    "**Question:**",
-                    mistake["question"]
-                )
+with tabs[9]:
 
-                st.write(
-                    "**Correct answer:**",
-                    mistake["answer"]
-                )
+    st.markdown(
+        '<div class="section-title">📊 Simon Growth Center</div>',
+        unsafe_allow_html=True
+    )
+
+    radar_data = pd.DataFrame({
+        "Subject": list(scores.keys()),
+        "Band": list(scores.values())
+    })
+
+    st.bar_chart(
+        radar_data.set_index("Subject")
+    )
+
+    st.markdown("### 📈 学习数据")
+
+    total_minutes = data["study_minutes"]
+
+    hours = total_minutes / 60
+
+    g1, g2, g3, g4 = st.columns(4)
+
+    g1.metric(
+        "学习小时",
+        f"{hours:.1f}"
+    )
+
+    g2.metric(
+        "完成题目",
+        data["questions_done"]
+    )
+
+    g3.metric(
+        "错题数量",
+        len(data["mistakes"])
+    )
+
+    g4.metric(
+        "词汇数量",
+        len(data["vocabulary"])
+    )
+
+    st.markdown("### 🧠 Simon 能力诊断")
+
+    for subject, value in scores.items():
+
+        if value < data["target_score"] - 1:
+            status = "🔴 重点提升"
+
+        elif value < data["target_score"]:
+            status = "🟡 接近目标"
+
+        else:
+            status = "🟢 达到目标"
+
+        st.write(
+            f"**{subject}** · {value:.1f} · {status}"
+        )
+
+    st.divider()
+
+    st.markdown("### 🏆 当前阶段")
+
+    if overall >= data["target_score"]:
+        stage = "🎉 目标达成"
+    elif overall >= 6.5:
+        stage = "🔥 冲刺阶段"
+    elif overall >= 6:
+        stage = "🚀 强化阶段"
+    else:
+        stage = "🌱 基础阶段"
+
+    st.success(
+        stage
+    )
 
 
-# =========================
+# ============================================================
 # FOOTER
-# =========================
+# ============================================================
 
 st.divider()
 
+st.markdown(
+    """
+    ### 🎓 Simon IELTS 7.0
+
+    **Learn → Practice → Diagnose → Adapt → Improve**
+
+    Simon IELTS 是学习辅助工具，不代表雅思官方产品，
+    AI评分仅用于学习参考，不保证实际考试成绩。
+    """
+)
+
 st.caption(
-    "IELTS Master V4 · Independent practice tool · "
-    "Not affiliated with IELTS, IDP, British Council or Cambridge."
+    f"Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 )
